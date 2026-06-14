@@ -13,11 +13,11 @@ import { apiClient } from '@/utils/api';
 import useSettings from '@/hooks/useSettings';
 import { pathJoin } from '@/utils/basic';
 import AutoCaptionButton from '@/components/AutoCaptionButton';
-import { CreatableSelectInput } from '@/components/formInputs';
+import { Checkbox, CreatableSelectInput } from '@/components/formInputs';
 
 export default function DatasetPage({ params }: { params: { datasetName: string } }) {
   const [imgList, setImgList] = useState<{ img_path: string; reference_path: string | null }[]>([]);
-  const [usesReferenceImages, setUsesReferenceImages] = useState(false);
+  const [referenceMode, setReferenceMode] = useState(false);
   const [isAutoCaptioning, setIsAutoCaptioning] = useState(false);
   const usableParams = use(params as any) as { datasetName: string };
   const datasetName = usableParams.datasetName;
@@ -29,15 +29,14 @@ export default function DatasetPage({ params }: { params: { datasetName: string 
   const [scrollParent, setScrollParent] = useState<HTMLDivElement | null>(null);
   const scrollParentCallback = useCallback((el: HTMLDivElement | null) => setScrollParent(el), []);
 
-  const refreshImageList = (dbName: string) => {
+  const refreshImageList = (dbName: string, useReferenceImages = referenceMode) => {
     setStatus('loading');
     apiClient
-      .post('/api/datasets/listImages', { datasetName: dbName })
+      .post('/api/datasets/listImages', { datasetName: dbName, useReferenceImages })
       .then((res: any) => {
         const data = res.data;
         // Server already sorts; avoid the client-side sort that's expensive on large lists.
         setImgList(data.images);
-        setUsesReferenceImages(Boolean(data.uses_reference_images));
         setStatus('success');
       })
       .catch(error => {
@@ -126,6 +125,17 @@ export default function DatasetPage({ params }: { params: { datasetName: string 
         </div>
         <div className="flex-1"></div>
         <div className="flex-shrink-0 flex items-center gap-1 sm:gap-2">
+          <Checkbox
+            className="whitespace-nowrap"
+            label={<span className="text-xs sm:text-sm">Reference mode</span>}
+            checked={referenceMode}
+            disabled={status === 'loading'}
+            onChange={enabled => {
+              setReferenceMode(enabled);
+              setSelectedImgPath(null);
+              refreshImageList(datasetName, enabled);
+            }}
+          />
           <div className="flex items-center gap-1">
             <label className="text-xs text-gray-400 hidden sm:inline whitespace-nowrap">Caption ext</label>
             <CreatableSelectInput
@@ -174,7 +184,7 @@ export default function DatasetPage({ params }: { params: { datasetName: string 
                   captionRefreshKey={captionRefreshKeys[img.img_path] || 0}
                   observerRoot={scrollParent}
                   captionExt={captionExt}
-                  showReferenceStatus={usesReferenceImages}
+                  showReferenceStatus={referenceMode}
                   hasReference={Boolean(img.reference_path)}
                 />
               );
@@ -193,6 +203,7 @@ export default function DatasetPage({ params }: { params: { datasetName: string 
         captionExt={captionExt}
         referencePath={selectedReferencePath}
         onReferenceChanged={() => refreshImageList(datasetName)}
+        referenceMode={referenceMode}
       />
     </>
   );

@@ -31,6 +31,7 @@ interface Props {
   captionExt?: string;
   referencePath?: string | null;
   onReferenceChanged?: () => void;
+  referenceMode?: boolean;
 }
 
 export default function DatasetImageViewer({
@@ -42,6 +43,7 @@ export default function DatasetImageViewer({
   captionExt = 'txt',
   referencePath = null,
   onReferenceChanged,
+  referenceMode = false,
 }: Props) {
   const [mounted, setMounted] = useState(false);
   const [isOpen, setIsOpen] = useState(Boolean(imgPath));
@@ -68,6 +70,10 @@ export default function DatasetImageViewer({
     setIsDrawing(false);
     setViewMode('target');
   }, [imgPath]);
+
+  useEffect(() => {
+    if (!referenceMode) setViewMode('target');
+  }, [referenceMode]);
 
   // Default to showing the editable boxes when an Ideogram caption is present.
   useEffect(() => {
@@ -489,30 +495,32 @@ export default function DatasetImageViewer({
                 ))}
 
               {/* Controls over the image */}
-              <div className="absolute top-2 left-2 flex items-center gap-1 z-20">
-                <button
-                  type="button"
-                  onClick={() => setViewMode('target')}
-                  className={classNames('rounded px-2 py-1 text-xs', {
-                    'bg-blue-600 text-white': viewMode === 'target',
-                    'bg-gray-900 text-gray-300 opacity-75': viewMode !== 'target',
-                  })}
-                >
-                  Target
-                </button>
-                <button
-                  type="button"
-                  disabled={!referencePath}
-                  onClick={() => referencePath && setViewMode('reference')}
-                  className={classNames('rounded px-2 py-1 text-xs', {
-                    'bg-blue-600 text-white': viewMode === 'reference',
-                    'bg-gray-900 text-gray-300 opacity-75': viewMode !== 'reference',
-                    'cursor-not-allowed opacity-40': !referencePath,
-                  })}
-                >
-                  Reference
-                </button>
-              </div>
+              {referenceMode && (
+                <div className="absolute top-2 left-2 flex items-center gap-1 z-20">
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('target')}
+                    className={classNames('rounded px-2 py-1 text-xs', {
+                      'bg-blue-600 text-white': viewMode === 'target',
+                      'bg-gray-900 text-gray-300 opacity-75': viewMode !== 'target',
+                    })}
+                  >
+                    Target
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!referencePath}
+                    onClick={() => referencePath && setViewMode('reference')}
+                    className={classNames('rounded px-2 py-1 text-xs', {
+                      'bg-blue-600 text-white': viewMode === 'reference',
+                      'bg-gray-900 text-gray-300 opacity-75': viewMode !== 'reference',
+                      'cursor-not-allowed opacity-40': !referencePath,
+                    })}
+                  >
+                    Reference
+                  </button>
+                </div>
+              )}
               <div className="absolute top-2 right-2 flex items-center gap-2 z-20">
                 {canShowBoxes && (
                   <button
@@ -576,33 +584,35 @@ export default function DatasetImageViewer({
                   {currentIndex >= 0 ? `${currentIndex + 1} / ${imageList.length}` : ''}
                 </div>
               </div>
-              <div className="rounded border border-gray-800 bg-gray-900 p-2">
-                <div className="flex items-center justify-between gap-2">
-                  <span className={referencePath ? 'text-emerald-400' : 'text-amber-400'}>
-                    {referencePath ? 'Reference image paired' : 'Reference image missing'}
-                  </span>
-                  <label
-                    className={classNames(
-                      'inline-flex cursor-pointer items-center gap-1 rounded bg-slate-700 px-2 py-1 text-xs text-white',
-                      { 'cursor-wait opacity-50': isUploadingReference },
-                    )}
-                  >
-                    <Upload className="h-3 w-3" />
-                    {referencePath ? 'Replace' : 'Upload'}
-                    <input
-                      type="file"
-                      accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
-                      className="hidden"
-                      disabled={isUploadingReference}
-                      onChange={event => {
-                        const file = event.target.files?.[0];
-                        if (file) uploadReference(file);
-                        event.target.value = '';
-                      }}
-                    />
-                  </label>
+              {referenceMode && (
+                <div className="rounded border border-gray-800 bg-gray-900 p-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className={referencePath ? 'text-emerald-400' : 'text-amber-400'}>
+                      {referencePath ? 'Reference image paired' : 'Reference image missing'}
+                    </span>
+                    <label
+                      className={classNames(
+                        'inline-flex cursor-pointer items-center gap-1 rounded bg-slate-700 px-2 py-1 text-xs text-white',
+                        { 'cursor-wait opacity-50': isUploadingReference },
+                      )}
+                    >
+                      <Upload className="h-3 w-3" />
+                      {referencePath ? 'Replace' : 'Upload'}
+                      <input
+                        type="file"
+                        accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+                        className="hidden"
+                        disabled={isUploadingReference}
+                        onChange={event => {
+                          const file = event.target.files?.[0];
+                          if (file) uploadReference(file);
+                          event.target.value = '';
+                        }}
+                      />
+                    </label>
+                  </div>
                 </div>
-              </div>
+              )}
               {isCaptionLoaded && caption.trim() === '' && (
                 <select
                   className="w-full bg-gray-900 border border-gray-700 text-gray-100 text-sm rounded p-2 outline-none focus:ring-0 focus:outline-none"
