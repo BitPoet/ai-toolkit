@@ -18,6 +18,7 @@ type DisableableSections =
 type AdditionalSections =
   | 'datasets.control_path'
   | 'datasets.multi_control_paths'
+  | 'datasets.use_reference_images'
   | 'datasets.do_i2v'
   | 'datasets.do_audio'
   | 'datasets.audio_normalize'
@@ -1001,6 +1002,7 @@ export const modelArchs: ModelArch[] = [
       'model.low_vram',
       'model.layer_offloading',
       'ideogram_4_prompt',
+      'datasets.use_reference_images',
     ],
     hasMultiLinePrompts: true,
   },

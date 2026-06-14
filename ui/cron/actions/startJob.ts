@@ -53,8 +53,6 @@ const startAndWatchJob = (job: Job) => {
     // write the config file
     fs.writeFileSync(configPath, JSON.stringify(jobConfig, null, 2));
 
-    const pythonPath = resolvePythonPath();
-
     const runFilePath = path.join(TOOLKIT_ROOT, 'run.py');
     if (!fs.existsSync(runFilePath)) {
       console.error(`run.py not found at path: ${runFilePath}`);
@@ -73,6 +71,8 @@ const startAndWatchJob = (job: Job) => {
       CUDA_DEVICE_ORDER: 'PCI_BUS_ID',
       CUDA_VISIBLE_DEVICES: `${job.gpu_ids}`,
       IS_AI_TOOLKIT_UI: '1',
+      PYTHONIOENCODING: 'utf-8',
+      PYTHONUTF8: '1',
     };
 
     // HF_TOKEN
@@ -85,6 +85,7 @@ const startAndWatchJob = (job: Job) => {
     const args = [runFilePath, configPath, '--log', logPath];
 
     try {
+      const pythonPath = resolvePythonPath();
       let subprocess;
 
       if (isWindows) {
@@ -112,6 +113,11 @@ const startAndWatchJob = (job: Job) => {
         });
       }
 
+      await new Promise<void>((spawned, failed) => {
+        subprocess.once('spawn', spawned);
+        subprocess.once('error', failed);
+      });
+
       // Save the PID to the database and a file for future management (stop/inspect)
       const pid = subprocess.pid ?? null;
       if (pid != null) {
@@ -134,7 +140,7 @@ const startAndWatchJob = (job: Job) => {
       // (No stdout/stderr listeners — logging should go to --log handled by your Python)
       // (No monitoring loop — the whole point is to let it live past this worker)
     } catch (error: any) {
-      // Handle any exceptions during process launch
+      // Handle resolver errors and asynchronous spawn failures.
       console.error('Error launching process:', error);
 
       await prisma.job.update({
@@ -142,8 +148,10 @@ const startAndWatchJob = (job: Job) => {
         data: {
           status: 'error',
           info: `Error launching job: ${error?.message || 'Unknown error'}`,
+          pid: null,
         },
       });
+      reject(error);
       return;
     }
     // Resolve the promise immediately after starting the process
@@ -169,5 +177,9 @@ export default async function startJob(jobID: string) {
     },
   });
   // start and watch the job asynchronously so the cron can continue
-  startAndWatchJob(job);
+  try {
+    await startAndWatchJob(job);
+  } catch {
+    // startAndWatchJob records the actionable launch error on the job.
+  }
 }

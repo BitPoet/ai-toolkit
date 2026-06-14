@@ -69,11 +69,17 @@ export const handleModelArchChange = (
   // update datasets
   const hasControlPath = newArch?.additionalSections?.includes('datasets.control_path') || false;
   const hasMultiControlPaths = newArch?.additionalSections?.includes('datasets.multi_control_paths') || false;
+  const hasReferenceImages = newArch?.additionalSections?.includes('datasets.use_reference_images') || false;
   const hasNumFrames = newArch?.additionalSections?.includes('datasets.num_frames') || false;
   const controls = newArch?.controls ?? [];
   const datasets = jobConfig.config.process[0].datasets.map(dataset => {
     const newDataset = objectCopy(dataset);
     newDataset.controls = controls;
+    if (hasReferenceImages) {
+      newDataset.use_reference_images = newDataset.use_reference_images || false;
+    } else if ('use_reference_images' in newDataset) {
+      delete newDataset.use_reference_images;
+    }
     if (hasMultiControlPaths) {
       // make sure the config has the multi control paths
       newDataset.control_path_1 = newDataset.control_path_1 || null;

@@ -22,15 +22,38 @@ export async function POST(request: Request) {
     imageFiles.sort((a, b) => a.localeCompare(b));
 
     // Format response
+    const usesReferenceImages = hasReferenceDirectory(datasetFolder);
     const result = imageFiles.map(imgPath => ({
       img_path: imgPath,
+      reference_path: findReferenceImage(imgPath),
     }));
 
-    return NextResponse.json({ images: result });
+    return NextResponse.json({ images: result, uses_reference_images: usesReferenceImages });
   } catch (error) {
     console.error('Error finding images:', error);
     return NextResponse.json({ error: 'Failed to process request' }, { status: 500 });
   }
+}
+
+function findReferenceImage(imgPath: string): string | null {
+  const parsed = path.parse(imgPath);
+  const referenceDir = path.join(parsed.dir, '_controls');
+  const extensions = ['.jpg', '.jpeg', '.png', '.webp'];
+  for (const ext of extensions) {
+    const candidate = path.join(referenceDir, `${parsed.name}.reference${ext}`);
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+function hasReferenceDirectory(dir: string): boolean {
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
+    if (entry.name === '_controls') return true;
+    if (hasReferenceDirectory(path.join(dir, entry.name))) return true;
+  }
+  return false;
 }
 
 /**

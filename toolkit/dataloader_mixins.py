@@ -69,6 +69,17 @@ transforms_dict = {
 img_ext_list = ['.jpg', '.jpeg', '.png', '.webp']
 
 
+def get_reference_image_path(img_path: str) -> Union[str, None]:
+    reference_dir = os.path.join(os.path.dirname(img_path), '_controls')
+    file_name_no_ext = os.path.splitext(os.path.basename(img_path))[0]
+    reference_name = f"{file_name_no_ext}.reference"
+    for ext in img_ext_list:
+        possible_path = os.path.join(reference_dir, reference_name + ext)
+        if os.path.exists(possible_path):
+            return possible_path
+    return None
+
+
 def standardize_images(images):
     """
     Standardize the given batch of images using the specified mean and std.
@@ -964,7 +975,24 @@ class ControlFileItemDTOMixin:
         self.use_raw_control_images = sd is not None and sd.use_raw_control_images
         dataset_config: 'DatasetConfig' = kwargs.get('dataset_config', None)
         self.full_size_control_images = False
-        if dataset_config.control_path is not None:
+        if dataset_config.use_reference_images:
+            img_path = kwargs.get('path', None)
+            reference_path = get_reference_image_path(img_path)
+            if reference_path is None:
+                reference_pattern = os.path.join(
+                    os.path.dirname(img_path),
+                    '_controls',
+                    f"{os.path.splitext(os.path.basename(img_path))[0]}.reference"
+                    ".{jpg,jpeg,png,webp}",
+                )
+                raise FileNotFoundError(
+                    f"Missing reference image for {img_path}. Expected "
+                    f"{reference_pattern}"
+                )
+            self.control_path = reference_path
+            self.has_control_image = True
+            self.full_size_control_images = True
+        elif dataset_config.control_path is not None:
             # find the control image path
             control_path_list = dataset_config.control_path
             if not isinstance(control_path_list, list):

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import fs from 'fs';
+import path from 'path';
 import { getDatasetsRoot, getTrainingFolder } from '@/server/settings';
 
 export async function POST(request: Request) {
@@ -26,6 +27,15 @@ export async function POST(request: Request) {
 
     // delete it and return success
     fs.unlinkSync(imgPath);
+
+    const parsedImagePath = path.parse(imgPath);
+    const referenceDir = path.join(parsedImagePath.dir, '_controls');
+    for (const ext of ['.jpg', '.jpeg', '.png', '.webp']) {
+      const referencePath = path.join(referenceDir, `${parsedImagePath.name}.reference${ext}`);
+      if (fs.existsSync(referencePath)) {
+        fs.unlinkSync(referencePath);
+      }
+    }
 
     // check for caption
     const captionPath = imgPath.replace(/\.[^/.]+$/, '') + '.txt';

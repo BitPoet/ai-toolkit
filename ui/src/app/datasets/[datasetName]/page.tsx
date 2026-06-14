@@ -16,7 +16,8 @@ import AutoCaptionButton from '@/components/AutoCaptionButton';
 import { CreatableSelectInput } from '@/components/formInputs';
 
 export default function DatasetPage({ params }: { params: { datasetName: string } }) {
-  const [imgList, setImgList] = useState<{ img_path: string }[]>([]);
+  const [imgList, setImgList] = useState<{ img_path: string; reference_path: string | null }[]>([]);
+  const [usesReferenceImages, setUsesReferenceImages] = useState(false);
   const [isAutoCaptioning, setIsAutoCaptioning] = useState(false);
   const usableParams = use(params as any) as { datasetName: string };
   const datasetName = usableParams.datasetName;
@@ -36,6 +37,7 @@ export default function DatasetPage({ params }: { params: { datasetName: string 
         const data = res.data;
         // Server already sorts; avoid the client-side sort that's expensive on large lists.
         setImgList(data.images);
+        setUsesReferenceImages(Boolean(data.uses_reference_images));
         setStatus('success');
       })
       .catch(error => {
@@ -46,6 +48,10 @@ export default function DatasetPage({ params }: { params: { datasetName: string 
   useOpenImagesModalOnDrag(datasetName, () => refreshImageList(datasetName));
 
   const imgPaths = useMemo(() => imgList.map(img => img.img_path), [imgList]);
+  const selectedReferencePath = useMemo(
+    () => imgList.find(img => img.img_path === selectedImgPath)?.reference_path ?? null,
+    [imgList, selectedImgPath],
+  );
 
   useEffect(() => {
     if (datasetName) {
@@ -168,6 +174,8 @@ export default function DatasetPage({ params }: { params: { datasetName: string 
                   captionRefreshKey={captionRefreshKeys[img.img_path] || 0}
                   observerRoot={scrollParent}
                   captionExt={captionExt}
+                  showReferenceStatus={usesReferenceImages}
+                  hasReference={Boolean(img.reference_path)}
                 />
               );
             }}
@@ -183,6 +191,8 @@ export default function DatasetPage({ params }: { params: { datasetName: string 
         refreshImages={() => refreshImageList(datasetName)}
         onCaptionSaved={path => setCaptionRefreshKeys(prev => ({ ...prev, [path]: (prev[path] || 0) + 1 }))}
         captionExt={captionExt}
+        referencePath={selectedReferencePath}
+        onReferenceChanged={() => refreshImageList(datasetName)}
       />
     </>
   );

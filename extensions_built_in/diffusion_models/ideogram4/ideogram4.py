@@ -2,6 +2,7 @@ import os
 from typing import List, Optional
 
 import torch
+import torch.nn.functional as F
 import yaml
 from safetensors.torch import load_file, save_file
 
@@ -184,6 +185,11 @@ class Ideogram4Model(BaseModel):
         self.max_text_length = int(
             self.model_config.model_kwargs.get("max_text_length", 3072)
         )
+        self.reference_dropout = float(
+            self.model_config.model_kwargs.get("reference_dropout", 0.0)
+        )
+        if not 0.0 <= self.reference_dropout <= 1.0:
+            raise ValueError("reference_dropout must be between 0.0 and 1.0")
 
         self._latent_shift = None
         self._latent_scale = None
@@ -377,7 +383,7 @@ class Ideogram4Model(BaseModel):
     # ------------------------------------------------------------------
     def get_noise_prediction(
         self,
-        latent_model_input: torch.Tensor,  # (B, 128, gh, gw)
+        latent_model_input: torch.Tensor,  # target or [target | reference] channels
         timestep: torch.Tensor,  # 0 to 1000 scale
         text_embeddings: AdvancedPromptEmbeds,
         **kwargs,
@@ -391,6 +397,16 @@ class Ideogram4Model(BaseModel):
         if t01.shape[0] != latent_model_input.shape[0]:
             t01 = t01.expand(latent_model_input.shape[0])
 
+        latent_channels = self.transformer.config.in_channels
+        reference_latents = None
+        if latent_model_input.shape[1] == latent_channels * 2:
+            latent_model_input, reference_latents = latent_model_input.chunk(2, dim=1)
+        elif latent_model_input.shape[1] != latent_channels:
+            raise ValueError(
+                "Ideogram4 expected target latents or target/reference latents, got "
+                f"{latent_model_input.shape[1]} channels"
+            )
+
         # Pad the per-sample caption features to the batch max here.
         llm_features, text_mask = pad_text_features(
             text_embeddings.text_embeds, self.device_torch, self.torch_dtype
@@ -402,6 +418,7 @@ class Ideogram4Model(BaseModel):
             t01,
             llm_features,
             text_mask,
+            reference_latents=reference_latents,
         )
         return pred
 
@@ -448,6 +465,64 @@ class Ideogram4Model(BaseModel):
 
     def get_te_has_grad(self):
         return False
+
+    def condition_noisy_latents(self, latents: torch.Tensor, batch):
+        reference = batch.control_tensor
+        if reference is None:
+            return latents
+
+        with torch.no_grad():
+            if reference.ndim != 4 or reference.shape[1] != 3:
+                raise ValueError(
+                    "Ideogram4 reference images must be RGB tensors shaped "
+                    f"(B, 3, H, W), got {tuple(reference.shape)}"
+                )
+
+            if batch.tensor is not None:
+                target_size = batch.tensor.shape[-2:]
+            else:
+                target_size = (
+                    batch.file_items[0].crop_height,
+                    batch.file_items[0].crop_width,
+                )
+
+            reference = reference.to(
+                self.vae_device_torch, dtype=self.vae_torch_dtype
+            )
+            if reference.shape[-2:] != target_size:
+                reference = F.interpolate(
+                    reference,
+                    size=target_size,
+                    mode="bilinear",
+                    align_corners=False,
+                )
+
+            reference = reference * 2.0 - 1.0
+            reference_latents = self.encode_images(reference).to(
+                latents.device, latents.dtype
+            )
+            if reference_latents.shape != latents.shape:
+                raise ValueError(
+                    "Ideogram4 encoded reference must match target latent shape, got "
+                    f"{tuple(reference_latents.shape)} and {tuple(latents.shape)}"
+                )
+
+            if self.reference_dropout > 0.0:
+                keep = (
+                    torch.rand(
+                        reference_latents.shape[0],
+                        1,
+                        1,
+                        1,
+                        device=reference_latents.device,
+                    )
+                    >= self.reference_dropout
+                )
+                reference_latents = reference_latents * keep.to(
+                    reference_latents.dtype
+                )
+
+            return torch.cat((latents, reference_latents), dim=1).detach()
 
     # ------------------------------------------------------------------
     # VAE
