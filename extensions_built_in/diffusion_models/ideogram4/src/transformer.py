@@ -31,6 +31,7 @@ ATTENTION_BACKENDS = ("native", "flash")
 SEQUENCE_PADDING_INDICATOR = -1
 OUTPUT_IMAGE_INDICATOR = 2
 LLM_TOKEN_INDICATOR = 3
+REFERENCE_IMAGE_INDICATOR = 4
 
 # Image grid coordinates start at this offset so they never collide with text
 # token indices (text positions start at 0 and never exceed max_text_tokens).
@@ -457,7 +458,8 @@ class Ideogram4Transformer2DModel(nn.Module):
           t: (B,) or (B, L) flow-matching time in [0, 1].
           position_ids: (B, L, 3) (t, h, w) positions for MRoPE.
           segment_ids: (B, L) sample id within a packed batch.
-          indicator: (B, L) per-token role: LLM_TOKEN_INDICATOR or OUTPUT_IMAGE_INDICATOR.
+          indicator: (B, L) per-token role: LLM_TOKEN_INDICATOR,
+            OUTPUT_IMAGE_INDICATOR, or REFERENCE_IMAGE_INDICATOR.
 
         Returns:
           (B, L, in_channels) velocity prediction in float32. Only the positions
@@ -476,11 +478,15 @@ class Ideogram4Transformer2DModel(nn.Module):
         output_image_mask = (
             (indicator == OUTPUT_IMAGE_INDICATOR).to(x.dtype).unsqueeze(-1)
         )
+        reference_image_mask = (
+            (indicator == REFERENCE_IMAGE_INDICATOR).to(x.dtype).unsqueeze(-1)
+        )
+        image_mask = output_image_mask + reference_image_mask
 
         llm_features = llm_features * llm_token_mask
-        x = x * output_image_mask
+        x = x * image_mask
 
-        x = self.input_proj(x) * output_image_mask
+        x = self.input_proj(x) * image_mask
 
         # Keep shape (B, 1, ...) when t is per-sample so downstream adaln_modulation
         # projections don't pay for L identical copies.
@@ -495,7 +501,7 @@ class Ideogram4Transformer2DModel(nn.Module):
         h = x + llm_features
 
         image_indicator_embedding = self.embed_image_indicator(
-            (indicator == OUTPUT_IMAGE_INDICATOR).to(torch.long)
+            image_mask.squeeze(-1).to(torch.long)
         )
         h = h + image_indicator_embedding
 

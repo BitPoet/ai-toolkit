@@ -921,6 +921,11 @@ class DatasetConfig:
         self.control_path: Union[str,List[str]] = kwargs.get('control_path', None)  # depth maps, etc
         if self.control_path == '':
             self.control_path = None
+        self.use_reference_images: bool = kwargs.get('use_reference_images', False)
+        if self.use_reference_images and self.control_path is not None:
+            raise ValueError(
+                "use_reference_images and control_path are mutually exclusive"
+            )
         
         # handle multi control inputs from the ui. It is just easier to handle it here for a cleaner ui experience
         control_path_1 = kwargs.get('control_path_1', None)

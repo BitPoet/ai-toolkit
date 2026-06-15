@@ -20,6 +20,7 @@ from .transformer import (
     LLM_TOKEN_INDICATOR,
     OUTPUT_IMAGE_INDICATOR,
     QWEN3_VL_ACTIVATION_LAYERS,
+    REFERENCE_IMAGE_INDICATOR,
     SEQUENCE_PADDING_INDICATOR,
     Ideogram4Transformer2DModel,
 )
@@ -155,8 +156,9 @@ def predict_velocity(
     t: torch.Tensor,  # (B,) toolkit flow time in [0, 1] (1 = pure noise)
     llm_features: torch.Tensor,  # (B, Lt, llm_dim)
     text_mask: torch.Tensor,  # (B, Lt) 1 for real text tokens
+    reference_latents: Optional[torch.Tensor] = None,  # (B, 128, gh, gw)
 ) -> torch.Tensor:
-    """Run the transformer on the packed [text | image] sequence.
+    """Run the transformer on [text | output image | optional reference image].
 
     ``t`` is in the ai-toolkit flow-matching convention: ``t=1`` is pure noise,
     ``t=0`` is clean, and the returned velocity is ``noise - clean`` (matching the
@@ -170,10 +172,22 @@ def predict_velocity(
     b, c, gh, gw = latents.shape
     num_image_tokens = gh * gw
     num_text_tokens = llm_features.shape[1]
-    seq_len = num_text_tokens + num_image_tokens
+    has_reference = reference_latents is not None
+    if has_reference and reference_latents.shape != latents.shape:
+        raise ValueError(
+            "Ideogram4 reference latents must match target latent shape, got "
+            f"{tuple(reference_latents.shape)} and {tuple(latents.shape)}"
+        )
+    num_reference_tokens = num_image_tokens if has_reference else 0
+    seq_len = num_text_tokens + num_image_tokens + num_reference_tokens
 
     # image latents -> tokens (row-major: h outer, w inner)
     image_tokens = latents.permute(0, 2, 3, 1).reshape(b, num_image_tokens, c)
+    reference_tokens = None
+    if has_reference:
+        reference_tokens = reference_latents.permute(0, 2, 3, 1).reshape(
+            b, num_reference_tokens, c
+        )
 
     # The mask may arrive as a float (PromptEmbeds.to casts it to the embed
     # dtype); work in long so cumsum positions stay exact for long prompts.
@@ -181,13 +195,13 @@ def predict_velocity(
     text_mask_long = text_mask_bool.long()
 
     # noise tokens: text region is zeroed (masked out anyway)
-    x = torch.cat(
-        [
-            torch.zeros(b, num_text_tokens, c, device=device, dtype=image_tokens.dtype),
-            image_tokens,
-        ],
-        dim=1,
-    )
+    x_parts = [
+        torch.zeros(b, num_text_tokens, c, device=device, dtype=image_tokens.dtype),
+        image_tokens,
+    ]
+    if reference_tokens is not None:
+        x_parts.append(reference_tokens)
+    x = torch.cat(x_parts, dim=1)
 
     # llm features: image region is zero
     llm_full = torch.cat(
@@ -195,7 +209,7 @@ def predict_velocity(
             llm_features,
             torch.zeros(
                 b,
-                num_image_tokens,
+                num_image_tokens + num_reference_tokens,
                 llm_features.shape[-1],
                 device=device,
                 dtype=llm_features.dtype,
@@ -207,7 +221,11 @@ def predict_velocity(
     # indicator: real text -> 3, image -> 2, text pad -> 0
     indicator = torch.zeros(b, seq_len, dtype=torch.long, device=device)
     indicator[:, :num_text_tokens] = text_mask_long * LLM_TOKEN_INDICATOR
-    indicator[:, num_text_tokens:] = OUTPUT_IMAGE_INDICATOR
+    output_start = num_text_tokens
+    output_end = output_start + num_image_tokens
+    indicator[:, output_start:output_end] = OUTPUT_IMAGE_INDICATOR
+    if has_reference:
+        indicator[:, output_end:] = REFERENCE_IMAGE_INDICATOR
 
     # segment ids: real text + image -> 1, text pad -> -1 (its own padding segment)
     segment_ids = torch.ones(b, seq_len, dtype=torch.long, device=device)
@@ -226,12 +244,20 @@ def predict_velocity(
     w_idx = torch.arange(gw, device=device).view(1, -1).expand(gh, gw).reshape(-1)
     t_idx = torch.zeros_like(h_idx)
     image_pos = torch.stack([t_idx, h_idx, w_idx], dim=1) + IMAGE_POSITION_OFFSET
-    image_pos_3d = image_pos.unsqueeze(0).expand(b, -1, -1)
+    output_pos_3d = image_pos.unsqueeze(0).expand(b, -1, -1)
 
-    position_ids = torch.cat([text_pos_3d, image_pos_3d], dim=1)
+    position_parts = [text_pos_3d, output_pos_3d]
+    if has_reference:
+        reference_pos = image_pos.clone()
+        reference_pos[:, 0] += 1
+        position_parts.append(reference_pos.unsqueeze(0).expand(b, -1, -1))
+    position_ids = torch.cat(position_parts, dim=1)
 
     # Flip into the model's time convention (t=1 -> clean).
     model_t = 1.0 - t
+    if has_reference:
+        model_t = model_t.unsqueeze(1).expand(-1, seq_len).clone()
+        model_t[:, output_end:] = 1.0
 
     out = transformer(
         llm_features=llm_full,
@@ -242,7 +268,7 @@ def predict_velocity(
         indicator=indicator,
     )
 
-    image_velocity = out[:, num_text_tokens:]  # (B, Li, 128)
+    image_velocity = out[:, output_start:output_end]  # (B, Li, 128)
     image_velocity = image_velocity.reshape(b, gh, gw, c).permute(0, 3, 1, 2)
     # Model predicts clean - noise; negate to return toolkit velocity (noise - clean).
     return -image_velocity
