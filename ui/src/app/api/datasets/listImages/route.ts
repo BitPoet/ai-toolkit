@@ -7,6 +7,7 @@ export async function POST(request: Request) {
   const datasetsPath = await getDatasetsRoot();
   const body = await request.json();
   const { datasetName } = body;
+  const useReferenceImages = body.useReferenceImages === true;
   const datasetFolder = path.join(datasetsPath, datasetName);
 
   try {
@@ -24,6 +25,7 @@ export async function POST(request: Request) {
     // Format response
     const result = imageFiles.map(imgPath => ({
       img_path: imgPath,
+      reference_path: useReferenceImages ? findReferenceImage(imgPath) : null,
     }));
 
     return NextResponse.json({ images: result });
@@ -31,6 +33,17 @@ export async function POST(request: Request) {
     console.error('Error finding images:', error);
     return NextResponse.json({ error: 'Failed to process request' }, { status: 500 });
   }
+}
+
+function findReferenceImage(imgPath: string): string | null {
+  const parsed = path.parse(imgPath);
+  const referenceDir = path.join(parsed.dir, '_controls');
+  const extensions = ['.jpg', '.jpeg', '.png', '.webp'];
+  for (const ext of extensions) {
+    const candidate = path.join(referenceDir, `${parsed.name}.reference${ext}`);
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return null;
 }
 
 /**

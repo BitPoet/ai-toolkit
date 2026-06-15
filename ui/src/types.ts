@@ -96,6 +96,7 @@ export interface DatasetConfig {
   resolution: number[];
   controls: string[];
   control_path?: string | null;
+  use_reference_images?: boolean;
   num_frames: number;
   shrink_video_to_frames: boolean;
   do_i2v?: boolean;

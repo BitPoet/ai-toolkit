@@ -892,6 +892,16 @@ export default function SimpleJob({
                         onChange={value => setJobConfig(value, `config.process[0].datasets[${i}].folder_path`)}
                         options={datasetOptions}
                       />
+                      {modelArch?.additionalSections?.includes('datasets.use_reference_images') && (
+                        <Checkbox
+                          className="pt-3"
+                          label="Use paired reference images from _controls"
+                          checked={dataset.use_reference_images || false}
+                          onChange={value =>
+                            setJobConfig(value, `config.process[0].datasets[${i}].use_reference_images`)
+                          }
+                        />
+                      )}
                       {modelArch?.additionalSections?.includes('datasets.control_path') && (
                         <SelectInput
                           label="Control Dataset"

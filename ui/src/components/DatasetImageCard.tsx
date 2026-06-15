@@ -19,6 +19,8 @@ interface DatasetImageCardProps {
   observerRoot?: Element | null;
   rootMargin?: string;
   captionExt?: string;
+  showReferenceStatus?: boolean;
+  hasReference?: boolean;
 }
 
 const DatasetImageCard: React.FC<DatasetImageCardProps> = ({
@@ -33,6 +35,8 @@ const DatasetImageCard: React.FC<DatasetImageCardProps> = ({
   observerRoot = null,
   rootMargin = '200px 0px',
   captionExt = 'txt',
+  showReferenceStatus = false,
+  hasReference = false,
 }) => {
   const [loaded, setLoaded] = useState<boolean>(false);
   const [showAudioPlayer, setShowAudioPlayer] = useState(true);
@@ -231,6 +235,16 @@ const DatasetImageCard: React.FC<DatasetImageCardProps> = ({
             />
           )}
           {children && <div className="absolute inset-0 flex items-center justify-center">{children}</div>}
+          {showReferenceStatus && (
+            <div
+              className={classNames(
+                'absolute top-2 left-2 z-10 rounded px-2 py-1 text-xs font-medium',
+                hasReference ? 'bg-emerald-700 text-white' : 'bg-amber-700 text-white',
+              )}
+            >
+              {hasReference ? 'Reference' : 'Reference missing'}
+            </div>
+          )}
           <div className="absolute top-1 right-1 flex space-x-2 z-10">
             <button
               className="bg-gray-800 rounded-full p-2"

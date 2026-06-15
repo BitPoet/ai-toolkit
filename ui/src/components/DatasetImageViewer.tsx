@@ -2,7 +2,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Dialog, DialogBackdrop, DialogPanel } from '@headlessui/react';
-import { Cog, SquareDashed } from 'lucide-react';
+import { Cog, SquareDashed, Upload } from 'lucide-react';
 import { Menu, MenuButton, MenuItem, MenuItems } from '@headlessui/react';
 import classNames from 'classnames';
 import { openConfirm } from './ConfirmModal';
@@ -29,6 +29,9 @@ interface Props {
   refreshImages?: () => void;
   onCaptionSaved?: (imgPath: string, caption: string) => void;
   captionExt?: string;
+  referencePath?: string | null;
+  onReferenceChanged?: () => void;
+  referenceMode?: boolean;
 }
 
 export default function DatasetImageViewer({
@@ -38,6 +41,9 @@ export default function DatasetImageViewer({
   refreshImages,
   onCaptionSaved,
   captionExt = 'txt',
+  referencePath = null,
+  onReferenceChanged,
+  referenceMode = false,
 }: Props) {
   const [mounted, setMounted] = useState(false);
   const [isOpen, setIsOpen] = useState(Boolean(imgPath));
@@ -47,6 +53,8 @@ export default function DatasetImageViewer({
   const [showBoxes, setShowBoxes] = useState<boolean>(false);
   const [selectedBoxIndex, setSelectedBoxIndex] = useState<number | null>(null);
   const [isDrawing, setIsDrawing] = useState<boolean>(false);
+  const [viewMode, setViewMode] = useState<'target' | 'reference'>('target');
+  const [isUploadingReference, setIsUploadingReference] = useState(false);
   const captionRef = useRef<string>('');
   const savedCaptionRef = useRef<string>('');
   const currentImgPathRef = useRef<string | null>(null);
@@ -60,7 +68,12 @@ export default function DatasetImageViewer({
   useEffect(() => {
     setSelectedBoxIndex(null);
     setIsDrawing(false);
+    setViewMode('target');
   }, [imgPath]);
+
+  useEffect(() => {
+    if (!referenceMode) setViewMode('target');
+  }, [referenceMode]);
 
   // Default to showing the editable boxes when an Ideogram caption is present.
   useEffect(() => {
@@ -384,7 +397,30 @@ export default function DatasetImageViewer({
 
   const isCaptionCurrent = caption.trim() === savedCaption.trim();
   const boundingBoxes = useMemo(() => parseBoundingBoxes(caption), [caption]);
-  const canShowBoxes = Boolean(boundingBoxes && imgPath && !isAudio(imgPath) && !isVideo(imgPath));
+  const canShowBoxes = Boolean(
+    viewMode === 'target' && boundingBoxes && imgPath && !isAudio(imgPath) && !isVideo(imgPath),
+  );
+  const displayedImagePath = viewMode === 'reference' && referencePath ? referencePath : imgPath;
+
+  const uploadReference = async (file: File) => {
+    if (!imgPath) return;
+    setIsUploadingReference(true);
+    const formData = new FormData();
+    formData.append('targetPath', imgPath);
+    formData.append('file', file);
+    try {
+      await apiClient.post('/api/datasets/reference', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 0,
+      });
+      onReferenceChanged?.();
+      setViewMode('reference');
+    } catch (error) {
+      console.error('Error uploading reference image:', error);
+    } finally {
+      setIsUploadingReference(false);
+    }
+  };
 
   // Boxes are derived from the (locally edited) caption for the image overlay.
   const editBoxes = useMemo(() => extractBoxes(safeParse(caption)), [caption]);
@@ -424,7 +460,7 @@ export default function DatasetImageViewer({
                   />
                 ) : (
                   <TransformWrapper
-                    key={imgPath}
+                    key={displayedImagePath}
                     initialScale={1}
                     minScale={1}
                     maxScale={6}
@@ -438,12 +474,12 @@ export default function DatasetImageViewer({
                     <TransformComponent>
                       <div className="relative">
                         <img
-                          src={`/api/img/${encodeURIComponent(imgPath)}`}
-                          alt="Dataset Image"
+                          src={`/api/img/${encodeURIComponent(displayedImagePath || imgPath)}`}
+                          alt={viewMode === 'reference' ? 'Reference Image' : 'Dataset Image'}
                           draggable={false}
                           className="w-auto h-auto max-w-full max-h-[50vh] sm:max-h-[90vh] object-contain select-none !pointer-events-auto"
                         />
-                        {showBoxes && (
+                        {viewMode === 'target' && showBoxes && (
                           <BoundingBoxEditor
                             boxes={editBoxes}
                             selectedIndex={selectedBoxIndex}
@@ -459,6 +495,32 @@ export default function DatasetImageViewer({
                 ))}
 
               {/* Controls over the image */}
+              {referenceMode && (
+                <div className="absolute top-2 left-2 flex items-center gap-1 z-20">
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('target')}
+                    className={classNames('rounded px-2 py-1 text-xs', {
+                      'bg-blue-600 text-white': viewMode === 'target',
+                      'bg-gray-900 text-gray-300 opacity-75': viewMode !== 'target',
+                    })}
+                  >
+                    Target
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!referencePath}
+                    onClick={() => referencePath && setViewMode('reference')}
+                    className={classNames('rounded px-2 py-1 text-xs', {
+                      'bg-blue-600 text-white': viewMode === 'reference',
+                      'bg-gray-900 text-gray-300 opacity-75': viewMode !== 'reference',
+                      'cursor-not-allowed opacity-40': !referencePath,
+                    })}
+                  >
+                    Reference
+                  </button>
+                </div>
+              )}
               <div className="absolute top-2 right-2 flex items-center gap-2 z-20">
                 {canShowBoxes && (
                   <button
@@ -522,6 +584,35 @@ export default function DatasetImageViewer({
                   {currentIndex >= 0 ? `${currentIndex + 1} / ${imageList.length}` : ''}
                 </div>
               </div>
+              {referenceMode && (
+                <div className="rounded border border-gray-800 bg-gray-900 p-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className={referencePath ? 'text-emerald-400' : 'text-amber-400'}>
+                      {referencePath ? 'Reference image paired' : 'Reference image missing'}
+                    </span>
+                    <label
+                      className={classNames(
+                        'inline-flex cursor-pointer items-center gap-1 rounded bg-slate-700 px-2 py-1 text-xs text-white',
+                        { 'cursor-wait opacity-50': isUploadingReference },
+                      )}
+                    >
+                      <Upload className="h-3 w-3" />
+                      {referencePath ? 'Replace' : 'Upload'}
+                      <input
+                        type="file"
+                        accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+                        className="hidden"
+                        disabled={isUploadingReference}
+                        onChange={event => {
+                          const file = event.target.files?.[0];
+                          if (file) uploadReference(file);
+                          event.target.value = '';
+                        }}
+                      />
+                    </label>
+                  </div>
+                </div>
+              )}
               {isCaptionLoaded && caption.trim() === '' && (
                 <select
                   className="w-full bg-gray-900 border border-gray-700 text-gray-100 text-sm rounded p-2 outline-none focus:ring-0 focus:outline-none"
